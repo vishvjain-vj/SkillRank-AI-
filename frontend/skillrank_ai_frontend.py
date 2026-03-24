@@ -9,6 +9,63 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+# --- SESSION STATE INITIALIZATION ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+if "student_name" not in st.session_state:
+    st.session_state.student_name = None
+if "global_score" not in st.session_state:
+    st.session_state.global_score = 0
+
+# --- LOGIN SCREEN ---
+if not st.session_state.logged_in:
+    st.markdown("<h1 style='text-align: center; color: #00ffb4;'>Student Login</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Enter your credentials to access the Cognitive Tracker.</p>", unsafe_allow_html=True)
+    
+    with st.form("login_form"):
+        student_id = st.text_input("Student ID")
+        name = st.text_input("First Name")
+        submit = st.form_submit_button("Access Terminal")
+        
+        if submit:
+            if not student_id or not name:
+                st.warning("Please enter both ID and Name.")
+            else:
+                # Hit our new FastAPI Auth Router!
+                try:
+                    res = requests.post("http://127.0.0.1:8000/login", json={
+                        "student_id": student_id,
+                        "name": name
+                    })
+                    if res.status_code == 200:
+                        data = res.json()
+                        # Save the backend data into Streamlit's memory
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = data["user_id"]
+                        st.session_state.student_name = data["name"]
+                        st.session_state.global_score = data["global_score"]
+                        st.success(data["message"])
+                        st.rerun() # Force the page to refresh and hide the login screen!
+                    else:
+                        st.error("Backend error. Check terminal.")
+                except Exception as e:
+                    st.error("Could not connect to FastAPI server.")
+
+# STOP the script here if they aren't logged in
+if not st.session_state.logged_in:
+    st.stop()
+
+
+
+st.markdown("""
+<script>
+setTimeout(function(){
+    window.scrollTo(0,0);
+}, 100);
+</script>
+""", unsafe_allow_html=True)
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -31,7 +88,8 @@ html, body, .stApp {
     z-index: 0;
     pointer-events: none;
 }
-#MainMenu, footer, header { visibility: hidden !important; }
+#MainMenu { visibility: hidden !important; }
+footer { visibility: hidden !important; }
 .block-container { padding: 1rem 2rem 2rem !important; max-width: 100% !important; }
 
 /* ── SIDEBAR ── */
@@ -355,16 +413,6 @@ with st.sidebar:
 # MAIN CONTENT
 # ════════════════════════════════════════════════════════════
 
-# Hero header
-st.markdown("""
-<div class="hero-wrap">
-  <div class="trophy-orb">🏆</div>
-  <div class="hero-tagline">Competitive Learning Platform</div>
-  <div class="hero-title">SKILLRANK AI</div>
-  <div class="hero-sub">// CURIOSITY IS YOUR CURRENCY · LEARN · RANK · CONQUER //</div>
-</div>
-""", unsafe_allow_html=True)
-
 # XP flash banner — shows after first interaction
 if st.session_state.last_score_added > 0:
     st.markdown(f"""
@@ -376,39 +424,37 @@ if st.session_state.last_score_added > 0:
     </div>
     """, unsafe_allow_html=True)
 
-# Chat header bar
-st.markdown("""
-<div class="chat-header">
-  <div class="chat-header-title"><span class="live-dot"></span>TUTOR SESSION</div>
-  <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
-       color:rgba(200,220,255,0.3);">DEEPER QUESTIONS = MORE XP ⚡</div>
-</div>
-""", unsafe_allow_html=True)
+# 1. THE DISAPPEARING HERO HEADER (Only shows when chat is empty)
+if not st.session_state.messages:
+    st.markdown("""
+    <div class="hero-wrap">
+      <div class="trophy-orb">🏆</div>
+      <div class="hero-tagline">Competitive Learning Platform</div>
+      <div class="hero-title">SKILLRANK AI</div>
+      <div class="hero-sub">// CURIOSITY IS YOUR CURRENCY · LEARN · RANK · CONQUER //</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.chat_message("assistant"):
+        st.markdown("🎓 **Welcome to SKILLRANK AI!** What concept are we mastering today?")
 
-# ── MANDATORY: Display full chat history ──────────────────────────────────────
+# 2. THE MINI HEADER (Only shows once they start chatting)
+else:
+    st.markdown("""
+    <div class="chat-header">
+      <div class="chat-header-title"><span class="live-dot"></span>TUTOR SESSION</div>
+      <div style="font-family:'Space Mono',monospace; font-size:9px; letter-spacing:2px;
+           color:rgba(200,220,255,0.3);">DEEPER QUESTIONS = MORE XP ⚡</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# 3. RENDER THE CHAT HISTORY
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Welcome message on fresh session
-if not st.session_state.messages:
-    with st.chat_message("assistant"):
-        st.markdown("""
-🎓 **Welcome to SKILLRANK AI!**
-
-I'm your AI tutor — and every question you ask **earns you XP**. The more curious and
-detailed your questions, the higher your score climbs and the faster you rank up.
-
-**Tips to earn more XP:**
-- Ask *why* and *how* questions 🧠
-- Go deeper with follow-ups 🔍
-- Keep your conversation going 🔥
-
-**Ready? Ask your first question below! ⚡**
-        """)
-
 # ── MANDATORY: st.chat_input — the actual message input box ──────────────────
-prompt = st.chat_input("Ask something curious… deeper questions earn more XP 🧠")
+prompt = st.chat_input("Ask something curious…")
 
 if prompt:
 
@@ -418,13 +464,12 @@ if prompt:
 
     # ── MANDATORY: POST to backend ────────────────────────────────────────────
     try:
-        res = requests.post(
-            "http://127.0.0.1:8000/chat",
-            json={
+        res = requests.post("http://127.0.0.1:8000/chat", json={
                 "message": prompt,
-                "history": st.session_state.messages   # mandatory field
-            }
-        )
+                "history": st.session_state.messages,
+                "user_id": st.session_state.user_id,          # <--- ADD THIS LINE
+                "session_id": "current_session_for_now"       # <--- ADD THIS LINE
+        })
 
         data = res.json()
 
@@ -460,9 +505,13 @@ if prompt:
             </div>
             """, unsafe_allow_html=True)
 
-    # ── MANDATORY: Error handling ─────────────────────────────────────────────
-    except Exception:
-        st.error("⚠️  Backend connection failed — make sure your FastAPI server is running on port 8000")
+   # ── MANDATORY: Error handling ─────────────────────────────────────────────
+    except Exception as e:
+        st.error(f"⚠️  The code crashed! Here is the exact reason: {e}")
+        
+        # If the backend sent an error back, let's print that too!
+        if 'res' in locals() and res.status_code != 200:
+            st.error(f"Backend Server Error {res.status_code}: {res.text}")
 
 # Footer
 st.markdown("""
